@@ -280,20 +280,29 @@ end
         write(mwe_path, mwe)
 
         trace_path = joinpath(dir, "coverage.info")
-        cmd = `$(Base.julia_cmd()) --project=$(pkgdir(DispatchDoctor)) --code-coverage=$trace_path $mwe_path`
+        julia = joinpath(Sys.BINDIR, Base.julia_exename())
+        cmd = `$julia --startup-file=no --project=$(pkgdir(DispatchDoctor)) --code-coverage=$trace_path $mwe_path`
         run(cmd)
 
         coverage_lines = split(read(trace_path, String), '\n')
-        record_start = findfirst(==("SF:$mwe_path"), coverage_lines)
+        record_start = findfirst(coverage_lines) do line
+            startswith(line, "SF:") && normpath(line[4:end]) == normpath(mwe_path)
+        end
         @test record_start !== nothing
-        record_end = findnext(==("end_of_record"), coverage_lines, record_start)
-        @test record_end !== nothing
-        header_line = findfirst(line -> occursin("function foo(x)", line), split(mwe, '\n'))
-        header_coverage = Regex("^DA:$header_line,[1-9][0-9]*\$")
-        @test any(
-            line -> occursin(header_coverage, line),
-            @view(coverage_lines[record_start:record_end]),
-        )
+        if record_start !== nothing
+            record_end = findnext(==("end_of_record"), coverage_lines, record_start)
+            @test record_end !== nothing
+            if record_end !== nothing
+                header_line = findfirst(
+                    line -> occursin("function foo(x)", line), split(mwe, '\n')
+                )
+                header_coverage = Regex("^DA:$header_line,[1-9][0-9]*\$")
+                @test any(
+                    line -> occursin(header_coverage, line),
+                    @view(coverage_lines[record_start:record_end]),
+                )
+            end
+        end
     end
 end
 @testitem "Type specialization" begin
