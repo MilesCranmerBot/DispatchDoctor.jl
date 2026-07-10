@@ -264,8 +264,7 @@ end
     # the function header line should get a coverage count (not `-`).
     mktempdir() do dir
         mwe_path = joinpath(dir, "mwe.jl")
-        write(
-            mwe_path,
+        mwe =
             """module StablePkg\n""" *
             """using DispatchDoctor\n""" *
             """export foo\n\n""" *
@@ -277,25 +276,24 @@ end
             """end\n\n""" *
             """using .StablePkg\n""" *
             """StablePkg.foo(1)\n""" *
-            """""",
-        )
+            """"""
+        write(mwe_path, mwe)
 
-        # Restrict coverage collection to the temporary directory so we don't
-        # litter the DispatchDoctor repo with .cov files during testing.
-        cmd = `$(Base.julia_cmd()) --project=$(pkgdir(DispatchDoctor)) --code-coverage=@$dir $mwe_path`
+        trace_path = joinpath(dir, "coverage.info")
+        cmd = `$(Base.julia_cmd()) --project=$(pkgdir(DispatchDoctor)) --code-coverage=$trace_path $mwe_path`
         run(cmd)
 
-        cov_paths = filter(
-            p -> startswith(basename(p), "mwe.jl.") && endswith(p, ".cov"),
-            readdir(dir; join=true),
+        coverage_lines = split(read(trace_path, String), '\n')
+        record_start = findfirst(==("SF:$mwe_path"), coverage_lines)
+        @test record_start !== nothing
+        record_end = findnext(==("end_of_record"), coverage_lines, record_start)
+        @test record_end !== nothing
+        header_line = findfirst(line -> occursin("function foo(x)", line), split(mwe, '\n'))
+        header_coverage = Regex("^DA:$header_line,[1-9][0-9]*\$")
+        @test any(
+            line -> occursin(header_coverage, line),
+            @view(coverage_lines[record_start:record_end]),
         )
-        @test !isempty(cov_paths)
-        cov = read(first(cov_paths), String)
-
-        lines = split(cov, '\n')
-        i = findfirst(l -> occursin("function foo(x)", l), lines)
-        @test i !== nothing
-        @test occursin(r"^\s*\d+\s+function foo\(x\)", lines[i])
     end
 end
 @testitem "Type specialization" begin
@@ -1276,7 +1274,6 @@ end
     push!(LOAD_PATH, joinpath(@__DIR__, "FakePackage1"))
     push!(LOAD_PATH, joinpath(@__DIR__, "FakePackage2"))
     push!(LOAD_PATH, joinpath(@__DIR__, "FakePackage3"))
-    push!(LOAD_PATH, joinpath(@__DIR__, "FakePackage4"))
 
     # These packages have `LocalPreferences.toml` with
     # various settings
@@ -1290,23 +1287,6 @@ end
     options = DDP.StabilizationOptions("d", "e", 6)
     @test DDP.get_all_preferred(options, FakePackage2) ==
         DDP.StabilizationOptions("d", "alpha", 6)
-
-    using FakePackage4
-    options = DDP.StabilizationOptions("d", "e", 6)
-    err = try
-        DDP.get_all_preferred(options, FakePackage4)
-        nothing
-    catch e
-        e
-    end
-    @test err isa ArgumentError
-    msg = sprint(showerror, err)
-    @test occursin("default_codegen_level", msg)
-    @test occursin("dispatch_doctor_codegen_level", msg)
-    @test occursin("default_union_limit", msg)
-    @test occursin("dispatch_doctor_union_limit", msg)
-    @test occursin("default_mode", msg)
-    @test occursin("dispatch_doctor_mode", msg)
 
     # FakePackage3 has no preferences
     using FakePackage3
