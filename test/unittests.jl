@@ -1369,7 +1369,7 @@ end
     using JET
 
     if VERSION >= v"1.10"
-        JET.test_package(DispatchDoctor; target_defined_modules=true)
+        JET.test_package(DispatchDoctor; target_modules=(DispatchDoctor,))
     end
 end
 @testitem "llvm ir" begin
